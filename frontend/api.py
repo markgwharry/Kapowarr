@@ -39,6 +39,7 @@ from backend.implementations.credentials import Credentials
 from backend.implementations.external_clients import ExternalClients
 from backend.implementations.naming import (generate_volume_folder_name,
                                             preview_mass_rename)
+from backend.implementations.newznab import NewznabIndexer, NewznabIndexers
 from backend.implementations.remote_mapping import RemoteMappings
 from backend.implementations.root_folders import RootFolders
 from backend.implementations.volumes import Library, delete_issue_file
@@ -947,7 +948,14 @@ def api_volume_download(id: int):
     Library.get_volume(id)
     link: str = extract_key(request, 'link')
     force_match: bool = extract_key(request, 'force_match')
-    result = run(DownloadHandler().add(link, id, force_match=force_match))
+    source: Union[str, None] = extract_key(request, 'source', check_existence=False)
+    source_title: Union[str, None] = extract_key(request, 'source_title', check_existence=False)
+    result = run(DownloadHandler().add(
+        link, id,
+        force_match=force_match,
+        source=source,
+        source_title=source_title
+    ))
     return return_api(
         {
             'result': (result or (None,))[0],
@@ -976,8 +984,13 @@ def api_issue_download(id: int):
     volume_id = Library.get_issue(id).get_data().volume_id
     link = extract_key(request, 'link')
     force_match: bool = extract_key(request, 'force_match')
+    source: Union[str, None] = extract_key(request, 'source', check_existence=False)
+    source_title: Union[str, None] = extract_key(request, 'source_title', check_existence=False)
     result = run(DownloadHandler().add(
-        link, volume_id, id, force_match=force_match
+        link, volume_id, id,
+        force_match=force_match,
+        source=source,
+        source_title=source_title
     ))
     return return_api(
         {
@@ -1308,6 +1321,62 @@ def api_external_client(id: int):
 
     elif request.method == 'DELETE':
         client.delete_client()
+        return return_api({})
+
+
+# =====================
+# Newznab Indexers
+# =====================
+@api.route('/indexers', methods=['GET', 'POST'])
+@error_handler
+@auth
+def api_indexers():
+    """List all indexers or add a new one."""
+    if request.method == 'GET':
+        result = [i.todict() for i in NewznabIndexers.get_indexers()]
+        return return_api(result)
+
+    elif request.method == 'POST':
+        data: dict = request.get_json()
+        indexer = NewznabIndexers.add(
+            title=data.get('title', ''),
+            base_url=data.get('base_url', ''),
+            api_key=data.get('api_key', ''),
+            enabled=data.get('enabled', True)
+        )
+        return return_api(indexer.get_data().todict(), code=201)
+
+
+@api.route('/indexers/test', methods=['POST'])
+@error_handler
+@auth
+def api_indexers_test():
+    """Test connection to a Newznab indexer."""
+    data: dict = request.get_json()
+    result = NewznabIndexers.test(
+        base_url=data.get('base_url', ''),
+        api_key=data.get('api_key', '')
+    )
+    return return_api(result)
+
+
+@api.route('/indexers/<int:id>', methods=['GET', 'PUT', 'DELETE'])
+@error_handler
+@auth
+def api_indexer(id: int):
+    """Get, update, or delete a specific indexer."""
+    indexer = NewznabIndexers.get_indexer(id)
+
+    if request.method == 'GET':
+        return return_api(indexer.get_data().todict())
+
+    elif request.method == 'PUT':
+        data: dict = request.get_json()
+        indexer.update(data)
+        return return_api(indexer.get_data().todict())
+
+    elif request.method == 'DELETE':
+        indexer.delete()
         return return_api({})
 
 

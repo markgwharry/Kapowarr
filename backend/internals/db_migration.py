@@ -1171,3 +1171,18 @@ def _migrate_remove_unsupported_source_blocklist_entries():
         (2,) # Source not supported
     )
     return
+
+
+@DatabaseMigrationHandler.register_handler(44)
+def _migrate_add_newznab_indexers_table():
+    """Add the newznab_indexers table for Usenet indexer support."""
+    get_db().executescript("""
+        CREATE TABLE IF NOT EXISTS newznab_indexers(
+            id INTEGER PRIMARY KEY,
+            title VARCHAR(255) NOT NULL,
+            base_url TEXT NOT NULL,
+            api_key VARCHAR(255) NOT NULL,
+            enabled BOOL NOT NULL DEFAULT 1
+        );
+    """)
+    return

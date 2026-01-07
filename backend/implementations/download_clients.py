@@ -933,3 +933,192 @@ class TorrentDownload(ExternalDownload, BaseDirectDownload):
             **super().as_dict(),
             'client': self.external_client.id if self._external_client else None
         }
+
+
+# region NZB/Usenet
+@final
+class NzbDownload(ExternalDownload, BaseDirectDownload):
+    """For downloading via Usenet using SABnzbd."""
+
+    identifier: str = 'nzb'
+
+    @property
+    def external_client(self) -> ExternalDownloadClient:
+        return self._external_client
+
+    @external_client.setter
+    def external_client(self, value: ExternalDownloadClient) -> None:
+        self._external_client = value
+        return
+
+    @property
+    def external_id(self) -> Union[str, None]:
+        return self._external_id
+
+    @property
+    def sleep_event(self) -> Event:
+        return self._sleep_event
+
+    def __init__(
+        self,
+        download_link: str,
+
+        volume_id: int,
+        covered_issues: Union[float, Tuple[float, float], None],
+
+        source_type: DownloadSource,
+        source_name: str,
+
+        web_link: Union[str, None],
+        web_title: Union[str, None],
+        web_sub_title: Union[str, None],
+
+        forced_match: bool = False,
+        external_client: Union[ExternalDownloadClient, None] = None,
+        nzb_title: Union[str, None] = None
+    ) -> None:
+        """Create an NZB download.
+
+        Args:
+            download_link (str): The NZB download URL.
+            volume_id (int): The ID of the volume this download is for.
+            covered_issues: The issue number(s) this download covers.
+            source_type (DownloadSource): The download source type.
+            source_name (str): The name of the indexer.
+            web_link (Union[str, None]): Link to the release page.
+            web_title (Union[str, None]): Title of the release.
+            web_sub_title (Union[str, None]): Sub-title.
+            forced_match (bool, optional): Force match. Defaults to False.
+            external_client (Union[ExternalDownloadClient, None], optional):
+                Specific client to use. Defaults to None.
+            nzb_title (Union[str, None], optional): Title from the NZB/indexer.
+                Defaults to None.
+        """
+        LOGGER.debug(
+            'Creating NZB download: %s',
+            download_link
+        )
+
+        settings = Settings().sv
+        volume = Volume(volume_id)
+
+        self._download_link = self._pure_link = download_link
+        self._volume_id = volume_id
+        self._issue_id = None
+        self._covered_issues = covered_issues
+        self._source_type = source_type
+        self._source_name = source_name
+        self._web_link = web_link
+        self._web_title = web_title
+        self._web_sub_title = web_sub_title
+
+        self._id = None
+        self._state = DownloadState.QUEUED_STATE
+        self._progress = 0.0
+        self._speed = 0.0
+        self._size = -1
+        self._download_thread = None
+        self._download_folder = settings.download_folder
+        self._sleep_event = Event()
+
+        self._original_files: List[str] = []
+        self._external_id: Union[str, None] = None
+
+        if external_client:
+            self._external_client = external_client
+        else:
+            self._external_client = ExternalClients.get_least_used_client(
+                DownloadType.USENET
+            )
+
+        try:
+            if isinstance(covered_issues, float):
+                self._issue_id = volume.get_issue_from_number(covered_issues).id
+
+        except IssueNotFound as e:
+            if not forced_match:
+                raise e
+
+        # Generate filename body
+        self._filename_body = ''
+        if settings.rename_downloaded_files:
+            try:
+                self._filename_body = generate_issue_name(
+                    volume.get_data(),
+                    covered_issues
+                )
+
+            except IssueNotFound as e:
+                if not forced_match:
+                    raise e
+
+        if not self._filename_body:
+            # Use the NZB title or extract from URL
+            if nzb_title:
+                self._filename_body = splitext(nzb_title)[0]
+            else:
+                # Try to extract from URL
+                self._filename_body = splitext(
+                    unquote_plus(download_link.split('/')[-1].split('?')[0])
+                )[0]
+
+        self._title = basename(self._filename_body)
+        # NZB downloads typically extract to a folder
+        self._files = [join(self._download_folder, self._filename_body)]
+        return
+
+    def run(self) -> None:
+        """Add the NZB to the Usenet client."""
+        self._external_id = self.external_client.add_download(
+            self.download_link,
+            RemoteMappings.local_to_remote(
+                self._external_client.id,
+                self._download_folder
+            ),
+            self.title
+        )
+        return
+
+    def update_status(self) -> None:
+        """Update download status from the Usenet client."""
+        if not self.external_id:
+            return
+
+        nzb_status = self.external_client.get_download(self.external_id)
+        if not nzb_status:
+            if nzb_status is None:
+                self._state = DownloadState.CANCELED_STATE
+            return
+
+        self._progress = nzb_status['progress']
+        self._speed = nzb_status['speed']
+        self._size = nzb_status['size']
+        if self.state not in (
+            DownloadState.CANCELED_STATE,
+            DownloadState.SHUTDOWN_STATE
+        ):
+            self._state = nzb_status['state']
+
+        return
+
+    def remove_from_client(self, delete_files: bool) -> None:
+        """Remove the download from the Usenet client."""
+        if not self.external_id:
+            return
+
+        self.external_client.delete_download(self.external_id, delete_files)
+        return
+
+    def stop(self,
+        state: DownloadState = DownloadState.CANCELED_STATE
+    ) -> None:
+        """Stop the download."""
+        self._state = state
+        self._sleep_event.set()
+        return
+
+    def as_dict(self) -> Dict[str, Any]:
+        return {
+            **super().as_dict(),
+            'client': self.external_client.id if self._external_client else None
+        }

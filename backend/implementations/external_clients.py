@@ -164,8 +164,10 @@ class ExternalClients:
         Returns:
             Dict[str, Type[ExternalDownloadClient]]: The mapping.
         """
+        # Import all client implementations to ensure they're discovered
         from backend.implementations.torrent_clients import (Transmission,
                                                              qBittorrent)
+        from backend.implementations.usenet_clients import SABnzbd
         return {
             client.client_type: client
             for client in sorted(

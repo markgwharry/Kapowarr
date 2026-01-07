@@ -6,13 +6,15 @@ from typing import Dict, List, Tuple, Union
 from backend.base.definitions import (QUERY_FORMATS, MatchedSearchResultData,
                                       SearchResultData, SearchSource,
                                       SpecialVersion)
-from backend.base.file_extraction import refine_special_version
+from backend.base.file_extraction import (extract_filename_data,
+                                          refine_special_version)
 from backend.base.helpers import (AsyncSession, check_overlapping_issues,
                                   extract_year_from_date, force_range,
                                   get_subclasses)
 from backend.base.logging import LOGGER
 from backend.implementations.getcomics import search_getcomics
 from backend.implementations.matching import check_search_result_match
+from backend.implementations.newznab import NewznabIndexers
 from backend.implementations.volumes import Volume
 
 
@@ -48,6 +50,11 @@ def _rank_search_result(
 
     # Prefer matches (False == 0 == higher rank)
     rating.append(not result['match'])
+
+    # Prefer Usenet sources over other sources (0 = Usenet, 1 = other)
+    source = result.get('source', '')
+    is_usenet = source.startswith('Usenet')
+    rating.append(0 if is_usenet else 1)
 
     # The more words in the search term that are present in
     # the search results' title, the higher ranked it gets
@@ -138,6 +145,49 @@ def _rank_search_result(
 class SearchGetComics(SearchSource):
     async def search(self, session: AsyncSession) -> List[SearchResultData]:
         return await search_getcomics(session, self.query)
+
+
+class SearchNewznab(SearchSource):
+    """Search Newznab indexers for comics."""
+
+    async def search(self, session: AsyncSession) -> List[SearchResultData]:
+        """Search all enabled Newznab indexers.
+
+        Args:
+            session (AsyncSession): The async session (not used for Newznab).
+
+        Returns:
+            List[SearchResultData]: Search results from all indexers.
+        """
+        # Newznab search is synchronous, so we run it directly
+        # The session parameter is for API compatibility
+        raw_results = NewznabIndexers.search_all(self.query)
+
+        results: List[SearchResultData] = []
+        for raw in raw_results:
+            try:
+                # Extract filename data from the release title
+                title = raw.get('title', '')
+                filename_data = extract_filename_data(title)
+
+                result: SearchResultData = {
+                    'series': filename_data.get('series', title),
+                    'year': filename_data.get('year'),
+                    'volume_number': filename_data.get('volume_number'),
+                    'special_version': filename_data.get('special_version'),
+                    'issue_number': filename_data.get('issue_number'),
+                    'annual': filename_data.get('annual', False),
+                    'link': raw.get('link', ''),
+                    'display_title': title,
+                    'source': f"Usenet ({raw.get('indexer', 'Unknown')})"
+                }
+                results.append(result)
+
+            except Exception as e:
+                LOGGER.debug(f"Failed to parse Newznab result: {e}")
+                continue
+
+        return results
 
 
 async def search_multiple_queries(*queries: str) -> List[SearchResultData]:

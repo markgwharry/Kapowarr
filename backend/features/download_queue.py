@@ -29,6 +29,7 @@ from backend.features.post_processing import (PostProcessor,
 from backend.implementations.blocklist import add_to_blocklist
 from backend.implementations.download_clients import (BaseDirectDownload,
                                                       MegaDownload,
+                                                      NzbDownload,
                                                       TorrentDownload)
 from backend.implementations.external_clients import ExternalClients
 from backend.implementations.getcomics import GetComicsPage
@@ -178,6 +179,55 @@ class DownloadHandler(metaclass=Singleton):
         ws.emit(RemovedFromQueueEvent(download))
         return
 
+    def __run_nzb_download(self, download: NzbDownload) -> None:
+        """Start a NZB/Usenet download. Intended to be run in a thread.
+
+        Args:
+            download (NzbDownload): The NZB download to run.
+                One of the entries in self.queue.
+        """
+        download.run()
+
+        ws = WebSocket()
+        status_event = QueueStatusEvent(download)
+
+        # NZB downloads don't need seeding handling like torrents
+        # They complete extraction and are done
+        while True:
+            download.update_status()
+            ws.emit(status_event)
+
+            if download.state == DownloadState.CANCELED_STATE:
+                download.remove_from_client(delete_files=True)
+                PostProcessor.canceled(download)
+                self.queue.remove(download)
+                break
+
+            elif download.state == DownloadState.FAILED_STATE:
+                download.remove_from_client(delete_files=True)
+                PostProcessor.failed(download)
+                self.queue.remove(download)
+                break
+
+            elif download.state == DownloadState.SHUTDOWN_STATE:
+                break
+
+            elif download.state == DownloadState.IMPORTING_STATE:
+                if self.settings.sv.delete_completed_downloads:
+                    download.remove_from_client(delete_files=False)
+                PostProcessor.success(download)
+                self.queue.remove(download)
+                break
+
+            else:
+                # Queued or downloading
+                download.sleep_event.wait(
+                    timeout=Constants.USENET_UPDATE_INTERVAL
+                )
+
+        ws.emit(RemovedFromQueueEvent(download))
+        return
+
     # region Queue Management
     def _process_queue(self) -> None:
         """
@@ -316,6 +366,15 @@ class DownloadHandler(metaclass=Singleton):
                 download.download_thread = thread
                 thread.start()
 
+            elif isinstance(download, NzbDownload):
+                thread = Server().get_db_thread(
+                    target=self.__run_nzb_download,
+                    args=(download,),
+                    name=f'NzbDownloadThread-{download.id}'
+                )
+                download.download_thread = thread
+                thread.start()
+
             WebSocket().emit(AddedToQueueEvent(download))
         return downloads
 
@@ -346,17 +405,33 @@ class DownloadHandler(metaclass=Singleton):
         raise DownloadNotFound(download_id)
 
     # region Adding
-    def __determine_link_type(self, link: str) -> Union[str, None]:
-        """Determine the service type of the link (e.g. getcomics, torrent, etc.).
+    def __determine_link_type(
+        self,
+        link: str,
+        source: Union[str, None] = None
+    ) -> Union[str, None]:
+        """Determine the service type of the link (e.g. getcomics, nzb, etc.).
 
         Args:
             link (str): The link to check.
+            source (Union[str, None], optional): The source hint from search.
+                Defaults to None.
 
         Returns:
             Union[str, None]: The service type of the link or `None` if unknown.
         """
+        # Check source hint first
+        if source and source.startswith('Usenet'):
+            return 'nzb'
+
         if link.startswith(Constants.GC_SITE_URL):
             return 'gc'
+
+        # Detect Newznab API NZB download links
+        # Pattern: contains /api and t=get query parameter
+        if '/api' in link and 't=get' in link:
+            return 'nzb'
+
         return None
 
     def link_in_queue(self, link: str) -> bool:
@@ -392,12 +467,14 @@ class DownloadHandler(metaclass=Singleton):
         link: str,
         volume_id: int,
         issue_id: Union[int, None] = None,
-        force_match: bool = False
+        force_match: bool = False,
+        source: Union[str, None] = None,
+        source_title: Union[str, None] = None
     ) -> Tuple[List[dict], Union[EnqueuingDownloadFailureReason, None]]:
         """Add a download to the queue.
 
         Args:
-            link (str): A getcomics link to download from.
+            link (str): A download link (GetComics page or NZB URL).
 
             volume_id (int): The id of the volume for which the download is
             intended.
@@ -409,6 +486,14 @@ class DownloadHandler(metaclass=Singleton):
             force_match (bool, optional): On sources where downloads are
             filtered, skip this and instead download everything.
                 Defaults to False.
+
+            source (Union[str, None], optional): The source type hint from
+            search results (e.g., "Usenet (NZBGeek)").
+                Defaults to None.
+
+            source_title (Union[str, None], optional): The title from the
+            search result, used for NZB downloads.
+                Defaults to None.
 
         Returns:
             Tuple[List[dict], Union[FailReason, None]]:
@@ -425,9 +510,53 @@ class DownloadHandler(metaclass=Singleton):
             LOGGER.info('Download already in queue')
             return [], None
 
-        link_type = self.__determine_link_type(link)
+        link_type = self.__determine_link_type(link, source)
         downloads: List[Download] = []
-        if link_type == 'gc':
+
+        if link_type == 'nzb':
+            # Handle NZB/Usenet downloads
+            from backend.base.file_extraction import extract_filename_data
+
+            # Extract indexer name from source string (e.g., "Usenet (NZBGeek)" -> "NZBGeek")
+            indexer_name = 'Usenet'
+            if source and '(' in source:
+                indexer_name = source.split('(')[1].rstrip(')')
+
+            # Determine issue coverage from source title or issue_id
+            covered_issues: Union[float, Tuple[float, float], None] = None
+            if source_title:
+                filename_data = extract_filename_data(source_title)
+                covered_issues = filename_data.get('issue_number')
+
+            if issue_id and covered_issues is None:
+                issue = Issue(issue_id)
+                covered_issues = issue.get_data().calculated_issue_number
+
+            try:
+                nzb_download = NzbDownload(
+                    download_link=link,
+                    volume_id=volume_id,
+                    covered_issues=covered_issues,
+                    source_type=DownloadSource.USENET,
+                    source_name=indexer_name,
+                    web_link=None,
+                    web_title=source_title,
+                    web_sub_title=None,
+                    forced_match=force_match,
+                    nzb_title=source_title
+                )
+                downloads = [nzb_download]
+
+            except (ClientNotWorking, IssueNotFound, LinkBroken) as e:
+                LOGGER.warning(f'Failed to create NZB download: {e}')
+                if isinstance(e, ClientNotWorking):
+                    return [], EnqueuingDownloadFailureReason.NO_WORKING_CLIENT
+                elif isinstance(e, IssueNotFound):
+                    return [], EnqueuingDownloadFailureReason.ISSUE_NOT_FOUND
+                else:
+                    return [], EnqueuingDownloadFailureReason.NO_WORKING_LINKS
+
+        elif link_type == 'gc':
             gcp = GetComicsPage(link)
 
             try:
