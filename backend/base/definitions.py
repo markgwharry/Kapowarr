@@ -132,6 +132,15 @@ class Constants:
     TORRENT_TAG = "kapowarr"
     "The tag to give to downloads at external clients"
 
+    USENET_UPDATE_INTERVAL = 5 # seconds
+    "The interval in seconds between status updates from Usenet clients"
+
+    USENET_CATEGORY = "comics"
+    "The category to use for Usenet downloads in SABnzbd"
+
+    NEWZNAB_COMIC_CATEGORY = 7020
+    "The Newznab category ID for comics"
+
 
 class FileConstants:
     IMAGE_EXTENSIONS = (
@@ -430,6 +439,7 @@ class DownloadType(BaseEnum):
 
     DIRECT = 1
     TORRENT = 2
+    USENET = 3
 
 
 class GCDownloadSource(BaseEnum):
@@ -477,6 +487,8 @@ class DownloadSource(BaseEnum):
     "A direct download link straight from their own servers"
     GETCOMICS_TORRENT = "GetComics (torrent)"
     "A torrent magnet link directly on the webpage"
+    USENET = "Usenet"
+    "An NZB file from a Newznab indexer"
 
 
 class DownloadState(BaseEnum):

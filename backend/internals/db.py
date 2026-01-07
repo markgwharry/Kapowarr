@@ -524,4 +524,11 @@ CREATE TABLE IF NOT EXISTS remote_mappings(
         REFERENCES external_download_clients(id)
         ON DELETE CASCADE
 );
+CREATE TABLE IF NOT EXISTS newznab_indexers(
+    id INTEGER PRIMARY KEY,
+    title VARCHAR(255) NOT NULL,
+    base_url TEXT NOT NULL,
+    api_key VARCHAR(255) NOT NULL,
+    enabled BOOL NOT NULL DEFAULT 1
+);
 """
