@@ -24,6 +24,7 @@ from backend.base.files import create_folder, delete_file_folder
 from backend.base.helpers import CommaList, Singleton, get_subclasses
 from backend.base.logging import LOGGER
 from backend.features.post_processing import (PostProcessor,
+                                              PostProcessorNzb,
                                               PostProcessorTorrentsComplete,
                                               PostProcessorTorrentsCopy)
 from backend.implementations.blocklist import add_to_blocklist
@@ -215,7 +216,7 @@ class DownloadHandler(metaclass=Singleton):
             elif download.state == DownloadState.IMPORTING_STATE:
                 if self.settings.sv.delete_completed_downloads:
                     download.remove_from_client(delete_files=False)
-                PostProcessor.success(download)
+                PostProcessorNzb.success(download)
                 self.queue.remove(download)
                 break
 
@@ -612,12 +613,12 @@ class DownloadHandler(metaclass=Singleton):
 
     def add_multiple(
         self,
-        add_args: Iterable[Tuple[str, int, Union[int, None], bool]]
+        add_args: Iterable[Tuple[str, int, Union[int, None], bool, Union[str, None], Union[str, None]]]
     ) -> None:
         async def add_wrapper():
             await gather(
-                *(self.add(*entry)
-                for entry in add_args)
+                *(self.add(link, volume_id, issue_id, force_match, source, source_title)
+                for link, volume_id, issue_id, force_match, source, source_title in add_args)
             )
 
         run(add_wrapper())

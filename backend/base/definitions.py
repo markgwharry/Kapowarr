@@ -138,7 +138,7 @@ class Constants:
     USENET_CATEGORY = "comics"
     "The category to use for Usenet downloads in SABnzbd"
 
-    NEWZNAB_COMIC_CATEGORY = 7020
+    NEWZNAB_COMIC_CATEGORY = 7030
     "The Newznab category ID for comics"
 
 
@@ -432,6 +432,8 @@ class EnqueuingDownloadFailureReason(BaseEnum):
     ONLY_RATE_LIMITED_LINKS = "All working download links on the webpage are from rate limited services"
 
     LINK_BROKEN = "Download link broken"
+    ISSUE_NOT_FOUND = "Issue not found in volume"
+    NO_WORKING_CLIENT = "No working download client available"
 
 
 class DownloadType(BaseEnum):

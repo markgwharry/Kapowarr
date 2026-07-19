@@ -22,7 +22,7 @@ if TYPE_CHECKING:
                                           SearchResultMatchData, VolumeData)
 
 clean_title_regex = compile(
-    r'((?<=annual)s|/|\-|–|\+|,|\.|\!|:|\bthe\s|\band\b|&|’|\'|\"|\bone[\-\s]?shot\b|\bhard[\-\s]?cover\b|\bomnibus\b|\btpb\b)'
+    r'((?<=annual)s|/|\-|–|\+|,|\.|\!|:|\bthe[\s.]|\band\b|&|’|\'|\"|\bone[\-\s]?shot\b|\bhard[\-\s]?cover\b|\bomnibus\b|\btpb\b)'
 )
 
 
@@ -430,10 +430,9 @@ def check_search_result_match(
     if result['annual'] != annual:
         return {'match': False, 'match_issue': 'Annual conflict'}
 
-    if not (
-        match_title(volume_data.title, result['series'])
-        or match_title(volume_data.alt_title or '', result['series'])
-    ):
+    title_match = match_title(volume_data.title, result['series'])
+    alt_title_match = match_title(volume_data.alt_title or '', result['series'])
+    if not (title_match or alt_title_match):
         return {'match': False, 'match_issue': "Titles don't match"}
 
     if not match_volume_number(

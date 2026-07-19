@@ -98,12 +98,33 @@ class SABnzbd(BaseExternalClient):
             raise ClientNotWorking(BrokenClientReason.FAILED_PROCESSING_RESPONSE)
 
         # Check for API errors
-        if data.get('status') is False or data.get('error'):
-            error_msg = data.get('error', 'Unknown error')
+        status_val = data.get('status') if isinstance(data, dict) else None
+        error_val = data.get('error') if isinstance(data, dict) else None
+
+        LOGGER.debug(f"SABnzbd API response - mode={mode}, params={params}, status={status_val}, data_keys={list(data.keys()) if isinstance(data, dict) else 'not-dict'}")
+
+        # Special case: when querying queue/history with nzo_ids that don't exist,
+        # SABnzbd returns {'status': False, 'nzo_ids': []} - this is not an error,
+        # it just means the item isn't there (e.g., already completed/moved to history)
+        # Also handle delete operations - if deleting from queue fails, the item may
+        # have already moved to history, which is fine
+        if mode in ('queue', 'history') and params:
+            # For queue/history queries, a status=False just means the item
+            # isn't in that location - not an error
+            LOGGER.debug(f"SABnzbd queue/history operation - returning data regardless of status")
+            return data
+
+        if status_val is False or error_val:
+            error_msg = error_val or 'Unknown error'
             if 'API Key' in error_msg or 'apikey' in error_msg.lower():
                 LOGGER.error(f"SABnzbd API key invalid: {error_msg}")
                 raise CredentialInvalid
-            LOGGER.error(f"SABnzbd API error: {error_msg}")
+            # Ignore "Retry search" errors for duplicate detection
+            if 'Retry' in error_msg or 'duplicate' in error_msg.lower():
+                LOGGER.warning(f"SABnzbd duplicate/retry: {error_msg}")
+                # Return empty data instead of raising
+                return data
+            LOGGER.error(f"SABnzbd API error: {error_msg} (mode={mode})")
             raise ClientNotWorking(BrokenClientReason.NOT_CLIENT_INSTANCE)
 
         return data

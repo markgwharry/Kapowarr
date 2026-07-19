@@ -18,7 +18,7 @@ from backend.base.logging import LOGGER
 from backend.implementations.blocklist import add_to_blocklist
 from backend.implementations.conversion import mass_convert
 from backend.implementations.converters import extract_files_from_folder
-from backend.implementations.download_clients import TorrentDownload
+from backend.implementations.download_clients import NzbDownload, TorrentDownload
 from backend.implementations.file_matching import scan_files
 from backend.implementations.naming import mass_rename
 from backend.implementations.volumes import Volume
@@ -142,6 +142,43 @@ def move_torrent_to_dest(download: TorrentDownload) -> None:
     """
     Move folder downloaded using torrent from download folder to
     final destination, extract files, scan them, rename them.
+    """
+    if not exists(download.files[0]):
+        return
+
+    move_to_dest(download)
+
+    download.files = extract_files_from_folder(
+        download.files[0],
+        download.volume_id
+    )
+
+    if not download.files:
+        return
+
+    scan_files(
+        download.volume_id,
+        filepath_filter=download.files,
+        update_websocket=True
+    )
+
+    rename_files = Settings().sv.rename_downloaded_files
+    if rename_files:
+        download.files = mass_rename(
+            download.volume_id,
+            filepath_filter=download.files
+        )
+
+    return
+
+
+def move_nzb_to_dest(download: NzbDownload) -> None:
+    """
+    Move folder downloaded via NZB/Usenet from download folder to
+    final destination, extract files, scan them, rename them.
+
+    NZB downloads (like torrents) extract to folders, so this handles
+    the folder structure appropriately.
     """
     if not exists(download.files[0]):
         return
@@ -368,4 +405,18 @@ class PostProcessorTorrentsCopy(PostProcessor):
         copy_file_torrent,
         convert_file,
         reset_file_link
+    ]
+
+
+class PostProcessorNzb(PostProcessor):
+    """Post-processor for NZB/Usenet downloads.
+
+    NZB downloads extract to folders (like torrents), so they need
+    special handling to extract the files and register them in the database.
+    """
+    actions_success = [
+        remove_from_queue,
+        add_to_history,
+        move_nzb_to_dest,
+        convert_file
     ]
