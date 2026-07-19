@@ -14,8 +14,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
 async function loadIndexers(api_key) {
     try {
-        const result = await fetchAPI('/indexers', api_key);
-        indexers = result || [];
+        const response = await fetchAPI('/indexers', api_key);
+        indexers = response.result || [];
         renderIndexers(api_key);
     } catch (error) {
         console.error('Failed to load indexers:', error);
@@ -34,7 +34,7 @@ function renderIndexers(api_key) {
         indexers.forEach(indexer => {
             const button = document.createElement('button');
             button.className = 'indexer-button';
-            button.textContent = indexer.name;
+            button.textContent = indexer.title;
             button.dataset.id = indexer.id;
             button.addEventListener('click', () => openEditWindow(indexer));
             list.insertBefore(button, addButton);
@@ -85,8 +85,8 @@ function openAddWindow() {
 
 function openEditWindow(indexer) {
     editingIndexerId = indexer.id;
-    document.getElementById('edit-name-input').value = indexer.name;
-    document.getElementById('edit-url-input').value = indexer.url;
+    document.getElementById('edit-name-input').value = indexer.title;
+    document.getElementById('edit-url-input').value = indexer.base_url;
     document.getElementById('edit-apikey-input').value = indexer.api_key;
     document.getElementById('edit-error').classList.add('hidden');
     resetTestButton('edit');
@@ -105,8 +105,8 @@ async function testIndexer(mode, api_key) {
     
     try {
         await sendAPI('POST', '/indexers/test', api_key, {}, { 
-            name: name, 
-            url: indexer_url, 
+            title: name,
+            base_url: indexer_url,
             api_key: indexer_api_key 
         });
         testButton.classList.remove('testing');
@@ -129,8 +129,8 @@ async function addIndexer(api_key) {
     
     try {
         await sendAPI('POST', '/indexers', api_key, {}, { 
-            name: name, 
-            url: indexer_url, 
+            title: name,
+            base_url: indexer_url,
             api_key: indexer_api_key 
         });
         closeWindow();
@@ -148,8 +148,8 @@ async function updateIndexer(api_key) {
     
     try {
         await sendAPI('PUT', `/indexers/${editingIndexerId}`, api_key, {}, { 
-            name: name, 
-            url: indexer_url, 
+            title: name,
+            base_url: indexer_url,
             api_key: indexer_api_key 
         });
         closeWindow();

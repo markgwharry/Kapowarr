@@ -180,33 +180,7 @@ def move_nzb_to_dest(download: NzbDownload) -> None:
     NZB downloads (like torrents) extract to folders, so this handles
     the folder structure appropriately.
     """
-    if not exists(download.files[0]):
-        return
-
-    move_to_dest(download)
-
-    download.files = extract_files_from_folder(
-        download.files[0],
-        download.volume_id
-    )
-
-    if not download.files:
-        return
-
-    scan_files(
-        download.volume_id,
-        filepath_filter=download.files,
-        update_websocket=True
-    )
-
-    rename_files = Settings().sv.rename_downloaded_files
-    if rename_files:
-        download.files = mass_rename(
-            download.volume_id,
-            filepath_filter=download.files
-        )
-
-    return
+    move_torrent_to_dest(download)
 
 
 def copy_file_torrent(download: TorrentDownload) -> None:

@@ -101,17 +101,23 @@ class SABnzbd(BaseExternalClient):
         status_val = data.get('status') if isinstance(data, dict) else None
         error_val = data.get('error') if isinstance(data, dict) else None
 
-        LOGGER.debug(f"SABnzbd API response - mode={mode}, params={params}, status={status_val}, data_keys={list(data.keys()) if isinstance(data, dict) else 'not-dict'}")
+        LOGGER.debug(
+            f"SABnzbd API response - mode={mode}, "
+            f"param_keys={sorted(params) if params else []}, "
+            f"status={status_val}, "
+            f"data_keys={list(data.keys()) if isinstance(data, dict) else 'not-dict'}"
+        )
 
         # Special case: when querying queue/history with nzo_ids that don't exist,
         # SABnzbd returns {'status': False, 'nzo_ids': []} - this is not an error,
         # it just means the item isn't there (e.g., already completed/moved to history)
-        # Also handle delete operations - if deleting from queue fails, the item may
-        # have already moved to history, which is fine
-        if mode in ('queue', 'history') and params:
-            # For queue/history queries, a status=False just means the item
-            # isn't in that location - not an error
-            LOGGER.debug(f"SABnzbd queue/history operation - returning data regardless of status")
+        if (
+            mode in ('queue', 'history')
+            and params
+            and status_val is False
+            and not error_val
+            and data.get('nzo_ids') == []
+        ):
             return data
 
         if status_val is False or error_val:
