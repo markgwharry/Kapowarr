@@ -18,7 +18,7 @@ from backend.base.logging import LOGGER
 from backend.implementations.blocklist import add_to_blocklist
 from backend.implementations.conversion import mass_convert
 from backend.implementations.converters import extract_files_from_folder
-from backend.implementations.download_clients import TorrentDownload
+from backend.implementations.download_clients import NzbDownload, TorrentDownload
 from backend.implementations.file_matching import scan_files
 from backend.implementations.naming import mass_rename
 from backend.implementations.volumes import Volume
@@ -170,6 +170,17 @@ def move_torrent_to_dest(download: TorrentDownload) -> None:
         )
 
     return
+
+
+def move_nzb_to_dest(download: NzbDownload) -> None:
+    """
+    Move folder downloaded via NZB/Usenet from download folder to
+    final destination, extract files, scan them, rename them.
+
+    NZB downloads (like torrents) extract to folders, so this handles
+    the folder structure appropriately.
+    """
+    move_torrent_to_dest(download)
 
 
 def copy_file_torrent(download: TorrentDownload) -> None:
@@ -368,4 +379,18 @@ class PostProcessorTorrentsCopy(PostProcessor):
         copy_file_torrent,
         convert_file,
         reset_file_link
+    ]
+
+
+class PostProcessorNzb(PostProcessor):
+    """Post-processor for NZB/Usenet downloads.
+
+    NZB downloads extract to folders (like torrents), so they need
+    special handling to extract the files and register them in the database.
+    """
+    actions_success = [
+        remove_from_queue,
+        add_to_history,
+        move_nzb_to_dest,
+        convert_file
     ]
